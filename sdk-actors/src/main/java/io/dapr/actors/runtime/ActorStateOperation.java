@@ -46,6 +46,12 @@ final class ActorStateOperation {
    */
   ActorStateOperation(String operationType,
                       String key,
+                      Object value) {
+    this(operationType, key, value, null);
+  }
+
+  ActorStateOperation(String operationType,
+                      String key,
                       Object value,
                       String etag) {
     this.operationType = operationType;
