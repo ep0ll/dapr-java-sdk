@@ -24,6 +24,8 @@ import reactor.core.publisher.Mono;
 import java.io.IOException;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 
 /**
  * State Provider to interact with Dapr runtime to handle state.
@@ -54,6 +56,9 @@ class DaprStateAsyncProvider {
    * Flag determining if state serializer is the default serializer instead of user provided.
    */
   private final boolean isStateSerializerDefault;
+
+  /** ETags for values read by this actor provider, keyed by actor identity and state name. */
+  private final ConcurrentMap<String, String> stateETags = new ConcurrentHashMap<>();
 
   /**
    * Instantiates a new Actor's state provider.
@@ -160,10 +165,35 @@ class DaprStateAsyncProvider {
         }
       }
 
-      operations.add(new ActorStateOperation(operationName, key, value));
+      operations.add(new ActorStateOperation(operationName, key, value,
+          this.getETag(actorType, actorId.toString(), key)));
     }
 
-    return this.daprClient.saveStateTransactionally(actorType, actorId.toString(), operations);
+    return this.daprClient.saveStateTransactionally(actorType, actorId.toString(), operations)
+        .doOnSuccess(ignored -> {
+          for (ActorStateChange change : stateChanges) {
+            if (change != null) {
+              this.stateETags.remove(this.etagKey(actorType, actorId.toString(), change.getStateName()));
+            }
+          
+  private void rememberETag(String actorType, String actorId, String stateName, String etag) {
+    String key = this.etagKey(actorType, actorId, stateName);
+    if (etag == null || etag.isEmpty()) {
+      this.stateETags.remove(key);
+    } else {
+      this.stateETags.put(key, etag);
+    }
+  }
+
+  private String getETag(String actorType, String actorId, String stateName) {
+    return this.stateETags.get(this.etagKey(actorType, actorId, stateName));
+  }
+
+  private String etagKey(String actorType, String actorId, String stateName) {
+    return actorType + "\u0000" + actorId + "\u0000" + stateName;
+  }
+}
+        });
   }
 
 }
