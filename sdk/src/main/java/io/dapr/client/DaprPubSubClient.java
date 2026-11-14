@@ -237,6 +237,19 @@ final class DaprPubSubClient {
     if (deadLetterTopic != null && !deadLetterTopic.isEmpty()) {
       initialRequestBuilder.setDeadLetterTopic(deadLetterTopic);
     }
+    if (bulkSubscribeOptions != null && bulkSubscribeOptions.isEnabled()) {
+      DaprAppCallbackProtos.BulkSubscribeConfig.Builder bulkBuilder =
+          DaprAppCallbackProtos.BulkSubscribeConfig.newBuilder().setEnabled(true);
+      if (bulkSubscribeOptions.getMaxMessagesCount() != null) {
+        bulkBuilder.setMaxMessagesCount(bulkSubscribeOptions.getMaxMessagesCount());
+      }
+      if (bulkSubscribeOptions.getMaxAwaitDurationMs() != null) {
+        bulkBuilder.setMaxAwaitDurationMs(bulkSubscribeOptions.getMaxAwaitDurationMs());
+      }
+      initialRequestBuilder.setBulkSubscribe(bulkBuilder.build());
+    }
+
+
     DaprPubsubProtos.SubscribeTopicEventsRequestAlpha1 request =
         DaprPubsubProtos.SubscribeTopicEventsRequestAlpha1.newBuilder()
             .setInitialRequest(initialRequestBuilder.build())
