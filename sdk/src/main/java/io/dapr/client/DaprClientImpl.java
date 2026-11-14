@@ -369,6 +369,19 @@ public class DaprClientImpl extends AbstractDaprClient {
     return this.pubSubClient.subscribeToEvents(pubsubName, topic, deadLetterTopic, listener, type);
   }
 
+  @Override
+  @Deprecated
+  public <T> Subscription subscribeToEvents(
+      String pubsubName,
+      String topic,
+      String deadLetterTopic,
+      SubscriptionListener<T> listener,
+      TypeRef<T> type,
+      io.dapr.client.domain.BulkSubscribeOptions bulkSubscribeOptions) {
+    return this.pubSubClient.subscribeToEvents(
+        pubsubName, topic, deadLetterTopic, listener, type, bulkSubscribeOptions);
+  }
+
   /**
    * {@inheritDoc}
    */

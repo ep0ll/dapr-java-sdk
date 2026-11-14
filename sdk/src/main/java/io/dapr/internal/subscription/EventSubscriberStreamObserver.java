@@ -26,6 +26,7 @@ import org.slf4j.LoggerFactory;
 import reactor.core.publisher.FluxSink;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.lang.reflect.ParameterizedType;
 import java.lang.reflect.Type;
 
@@ -229,6 +230,10 @@ public class EventSubscriberStreamObserver<T>
 
   @Override
   public void onNext(DaprPubsubProtos.SubscribeTopicEventsResponseAlpha1 response) {
+    if (response.hasEventMessage() && !response.getEventMessagesList().isEmpty()) {
+      sink.error(new IllegalStateException("Streaming response contains both single and bulk events."));
+      return;
+    }
     if (response.hasInitialResponse()) {
       return;
     }
@@ -309,7 +314,8 @@ public class EventSubscriberStreamObserver<T>
       cloudEvent.setDatacontenttype(entry.getContentType());
     }
     TypeRef<?> innerType = extractInnerType(type);
-    Object data = innerType == null ? bytes : objectSerializer.deserialize(bytes, innerType);
+    Object data = innerType == null ? new String(bytes, StandardCharsets.UTF_8)
+        : objectSerializer.deserialize(bytes, innerType);
     cloudEvent.setData(data);
     cloudEvent.setTopic(topic);
     cloudEvent.setPubsubName(pubsubName);

@@ -218,23 +218,22 @@ final class DaprPubSubClient {
       String deadLetterTopic,
       SubscriptionListener<T> listener,
       TypeRef<T> type) {
+    return subscribeToEvents(pubsubName, topic, deadLetterTopic, listener, type, null);
+  }
+
+  <T> Subscription subscribeToEvents(
+      String pubsubName,
+      String topic,
+      String deadLetterTopic,
+      SubscriptionListener<T> listener,
+      TypeRef<T> type,
+      io.dapr.client.domain.BulkSubscribeOptions bulkSubscribeOptions) {
     DaprPubsubProtos.SubscribeTopicEventsRequestInitialAlpha1.Builder initialRequestBuilder =
         DaprPubsubProtos.SubscribeTopicEventsRequestInitialAlpha1.newBuilder()
             .setTopic(topic)
             .setPubsubName(pubsubName);
     if (deadLetterTopic != null && !deadLetterTopic.isEmpty()) {
       initialRequestBuilder.setDeadLetterTopic(deadLetterTopic);
-    }
-    if (bulkSubscribeOptions != null && bulkSubscribeOptions.isEnabled()) {
-      DaprAppCallbackProtos.BulkSubscribeConfig.Builder bulkBuilder =
-          DaprAppCallbackProtos.BulkSubscribeConfig.newBuilder().setEnabled(true);
-      if (bulkSubscribeOptions.getMaxMessagesCount() != null) {
-        bulkBuilder.setMaxMessagesCount(bulkSubscribeOptions.getMaxMessagesCount());
-      }
-      if (bulkSubscribeOptions.getMaxAwaitDurationMs() != null) {
-        bulkBuilder.setMaxAwaitDurationMs(bulkSubscribeOptions.getMaxAwaitDurationMs());
-      }
-      initialRequestBuilder.setBulkSubscribe(bulkBuilder.build());
     }
     DaprPubsubProtos.SubscribeTopicEventsRequestAlpha1 request =
         DaprPubsubProtos.SubscribeTopicEventsRequestAlpha1.newBuilder()
@@ -292,6 +291,17 @@ final class DaprPubSubClient {
 
     if (deadLetterTopic != null && !deadLetterTopic.isEmpty()) {
       initialRequestBuilder.setDeadLetterTopic(deadLetterTopic);
+    }
+    if (bulkSubscribeOptions != null && bulkSubscribeOptions.isEnabled()) {
+      DaprAppCallbackProtos.BulkSubscribeConfig.Builder bulkBuilder =
+          DaprAppCallbackProtos.BulkSubscribeConfig.newBuilder().setEnabled(true);
+      if (bulkSubscribeOptions.getMaxMessagesCount() != null) {
+        bulkBuilder.setMaxMessagesCount(bulkSubscribeOptions.getMaxMessagesCount());
+      }
+      if (bulkSubscribeOptions.getMaxAwaitDurationMs() != null) {
+        bulkBuilder.setMaxAwaitDurationMs(bulkSubscribeOptions.getMaxAwaitDurationMs());
+      }
+      initialRequestBuilder.setBulkSubscribe(bulkBuilder.build());
     }
 
     DaprPubsubProtos.SubscribeTopicEventsRequestAlpha1 request =

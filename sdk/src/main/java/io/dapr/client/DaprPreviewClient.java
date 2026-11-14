@@ -325,6 +325,28 @@ public interface DaprPreviewClient extends AutoCloseable {
       TypeRef<T> type);
 
   /**
+   * Subscribe to pubsub via streaming with optional bulk delivery.
+   *
+   * @param pubsubName Name of the pubsub component.
+   * @param topic Name of the topic.
+   * @param deadLetterTopic Optional dead-letter topic.
+   * @param listener Callback for delivered events.
+   * @param type Type for event payload deserialization.
+   * @param bulkSubscribeOptions Optional bulk delivery configuration.
+   * @param <T> Event payload type.
+   * @return An active subscription.
+   * @deprecated Use the reactive subscribeToTopic API when possible.
+   */
+  @Deprecated
+  <T> Subscription subscribeToEvents(
+      String pubsubName,
+      String topic,
+      String deadLetterTopic,
+      SubscriptionListener<T> listener,
+      TypeRef<T> type,
+      io.dapr.client.domain.BulkSubscribeOptions bulkSubscribeOptions);
+
+  /**
    * Subscribe to pubsub events via streaming using Project Reactor Flux.
    *
    * @param pubsubName Name of the pubsub component.
