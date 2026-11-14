@@ -41,6 +41,8 @@ import reactor.core.publisher.Mono;
 import javax.annotation.Nonnull;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.lang.reflect.ParameterizedType;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -388,7 +390,23 @@ final class DaprPubSubClient {
         } else {
           return null;
         }
-        T object = type == null ? null : DaprPubSubClient.this.objectSerializer.deserialize(bytes, type);
+        TypeRef<?> dataType = type;
+        if (type != null && type.getType() instanceof ParameterizedType parameterizedType
+            && parameterizedType.getRawType() == CloudEvent.class
+            && parameterizedType.getActualTypeArguments().length > 0) {
+          dataType = TypeRef.get(parameterizedType.getActualTypeArguments()[0]);
+        } else if (type != null && type.getType() == CloudEvent.class) {
+          dataType = null;
+        }
+
+        Object object;
+        if (type == null) {
+          object = null;
+        } else if (dataType == null) {
+          object = new String(bytes, StandardCharsets.UTF_8);
+        } else {
+          object = DaprPubSubClient.this.objectSerializer.deserialize(bytes, dataType);
+        }
         cloudEvent.setData(object);
         cloudEvent.setTopic(request.getInitialRequest().getTopic());
         cloudEvent.setPubsubName(request.getInitialRequest().getPubsubName());
