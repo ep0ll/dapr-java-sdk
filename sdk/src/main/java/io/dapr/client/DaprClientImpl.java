@@ -16,6 +16,7 @@ package io.dapr.client;
 import com.google.protobuf.Any;
 import com.google.protobuf.ByteString;
 import com.google.protobuf.Empty;
+import com.google.protobuf.UnknownFieldSet;
 import io.dapr.client.domain.ActorMetadata;
 import io.dapr.client.domain.AppConnectionPropertiesHealthMetadata;
 import io.dapr.client.domain.AppConnectionPropertiesMetadata;
@@ -971,6 +972,14 @@ public class DaprClientImpl extends AbstractDaprClient {
         jobBuilder.setFailurePolicy(FailurePolicyUtils.getJobFailurePolicy(scheduleJobRequest.getFailurePolicy()));
       }
 
+      if (scheduleJobRequest.getOverrideRoutePath() != null
+          && !scheduleJobRequest.getOverrideRoutePath().isEmpty()) {
+        UnknownFieldSet.Field routeField = UnknownFieldSet.Field.newBuilder()
+            .addLengthDelimited(ByteString.copyFromUtf8(scheduleJobRequest.getOverrideRoutePath()))
+            .build();
+        jobBuilder.mergeUnknownFields(UnknownFieldSet.newBuilder().addField(8, routeField).build());
+      }
+
       DaprJobsProtos.ScheduleJobRequest request = DaprJobsProtos.ScheduleJobRequest.newBuilder()
           .setOverwrite(scheduleJobRequest.getOverwrite())
           .setJob(jobBuilder.build())
@@ -1038,14 +1047,24 @@ public class DaprClientImpl extends AbstractDaprClient {
           getJobResponse.setFailurePolicy(getJobFailurePolicy(job.getFailurePolicy()));
         }
 
+        String overrideRoutePath = getJobOverrideRoutePath(job);
         return getJobResponse
             .setTtl(job.hasTtl() ? Instant.parse(job.getTtl()) : null)
             .setData(job.hasData() ? job.getData().getValue().toByteArray() : null)
-            .setRepeat(job.hasRepeats() ? job.getRepeats() : null);
+            .setRepeat(job.hasRepeats() ? job.getRepeats() : null)
+            .setOverrideRoutePath(overrideRoutePath);
       });
     } catch (Exception ex) {
       return DaprException.wrapMono(ex);
     }
+  }
+
+  private String getJobOverrideRoutePath(DaprJobsProtos.Job job) {
+    List<ByteString> routeValues = job.getUnknownFields().getField(8).getLengthDelimitedList();
+    if (routeValues.isEmpty()) {
+      return null;
+    }
+    return routeValues.get(routeValues.size() - 1).toStringUtf8();
   }
 
   private FailurePolicy getJobFailurePolicy(CommonProtos.JobFailurePolicy jobFailurePolicy) {

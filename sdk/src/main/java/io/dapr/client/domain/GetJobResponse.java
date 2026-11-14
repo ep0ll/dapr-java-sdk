@@ -26,6 +26,7 @@ public class GetJobResponse {
   private Integer repeats;
   private Instant ttl;
   private FailurePolicy failurePolicy;
+  private String overrideRoutePath;
 
   /**
    * Constructor to create GetJobResponse.
@@ -124,6 +125,17 @@ public class GetJobResponse {
     return this;
   }
 
+  /**
+   * Sets the optional relative HTTP callback path under /job/.
+   *
+   * @param overrideRoutePath Relative callback path, without a leading slash.
+   * @return This response instance.
+   */
+  public GetJobResponse setOverrideRoutePath(String overrideRoutePath) {
+    this.overrideRoutePath = overrideRoutePath;
+    return this;
+  }
+
   // Getters
 
   /**
@@ -178,6 +190,15 @@ public class GetJobResponse {
    */
   public Instant getTtl() {
     return ttl;
+  }
+
+  /**
+   * Gets the optional callback route path.
+   *
+   * @return The callback route path, or null when the job name is used.
+   */
+  public String getOverrideRoutePath() {
+    return overrideRoutePath;
   }
 
   /**

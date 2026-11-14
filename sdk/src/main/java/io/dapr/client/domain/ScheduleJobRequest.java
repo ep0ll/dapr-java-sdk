@@ -26,6 +26,7 @@ public class ScheduleJobRequest {
   private Integer repeats;
   private Instant ttl;
   private FailurePolicy failurePolicy;
+  private String overrideRoutePath;
   private boolean overwrite;
 
   /**
@@ -123,6 +124,26 @@ public class ScheduleJobRequest {
   public ScheduleJobRequest setFailurePolicy(FailurePolicy failurePolicy) {
     this.failurePolicy = failurePolicy;
     return this;
+  }
+
+  /**
+   * Sets the optional relative HTTP callback path under /job/. This does not change the job name.
+   *
+   * @param overrideRoutePath Relative callback path, without a leading slash.
+   * @return This builder instance.
+   */
+  public ScheduleJobRequest setOverrideRoutePath(String overrideRoutePath) {
+    this.overrideRoutePath = overrideRoutePath;
+    return this;
+  }
+
+  /**
+   * Gets the optional callback route path.
+   *
+   * @return The callback route path, or null when the job name is used.
+   */
+  public String getOverrideRoutePath() {
+    return overrideRoutePath;
   }
 
   /**
