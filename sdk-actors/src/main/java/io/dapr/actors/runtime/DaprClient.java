@@ -33,6 +33,16 @@ interface DaprClient {
   Mono<byte[]> getState(String actorType, String actorId, String keyName);
 
   /**
+   * Gets an actor state value together with the ETag returned by the state store.
+   *
+   * @param actorType Type of actor.
+   * @param actorId Actor identifier.
+   * @param keyName State name.
+   * @return The state bytes and their ETag.
+   */
+  Mono<ActorStateValue> getStateWithETag(String actorType, String actorId, String keyName);
+
+  /**
    * Saves state batch to Dapr.
    *
    * @param actorType  Type of actor.
