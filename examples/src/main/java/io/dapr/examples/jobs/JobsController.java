@@ -32,7 +32,7 @@ public class JobsController {
    * @param payload data from the job if payload exists.
    * @return Empty Mono.
    */
-  @PostMapping("/job/{jobName}")
+  @PostMapping("/job/{*jobName}")
   public Mono<Void> handleJob(@PathVariable("jobName") String jobName,
                               @RequestBody(required = false) byte[] payload) {
     System.out.println("Job Name: " + jobName);
