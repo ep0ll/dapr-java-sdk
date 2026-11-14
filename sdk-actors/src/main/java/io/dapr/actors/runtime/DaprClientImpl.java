@@ -80,6 +80,11 @@ class DaprClientImpl implements DaprClient {
    */
   @Override
   public Mono<byte[]> getState(String actorType, String actorId, String keyName) {
+    return this.getStateWithETag(actorType, actorId, keyName).map(ActorStateValue::getData);
+  }
+
+  @Override
+  public Mono<ActorStateValue> getStateWithETag(String actorType, String actorId, String keyName) {
     DaprActorsProtos.GetActorStateRequest req =
         DaprActorsProtos.GetActorStateRequest.newBuilder()
                     .setActorType(actorType)
@@ -88,7 +93,8 @@ class DaprClientImpl implements DaprClient {
                     .build();
 
     return Mono.<DaprActorsProtos.GetActorStateResponse>create(it ->
-            client.getActorState(req, createStreamObserver(it))).map(r -> r.getData().toByteArray());
+            client.getActorState(req, createStreamObserver(it)))
+        .map(r -> new ActorStateValue(r.getData().toByteArray(), r.getEtag()));
   }
 
   /**
@@ -108,6 +114,9 @@ class DaprClientImpl implements DaprClient {
           DaprActorsProtos.TransactionalActorStateOperation.newBuilder()
               .setOperationType(operationType)
               .setKey(key);
+      if (op.getETag() != null && !op.getETag().isEmpty()) {
+        opBuilder.setEtag(op.getETag());
+      }
       if (value != null) {
         if (value instanceof String) {
           opBuilder.setValue(Any.newBuilder().setValue(ByteString.copyFrom((String) value, CHARSET)));
@@ -135,7 +144,14 @@ class DaprClientImpl implements DaprClient {
             .addAllOperations(grpcOps)
             .build();
 
-    return Mono.<Empty>create(it -> client.executeActorStateTransaction(req, createStreamObserver(it))).then();
+    return Mono.<Empty>create(it -> client.executeActorStateTransaction(req, createStreamObserver(it)))
+        .onErrorMap(error -> {
+          if (io.grpc.Status.fromThrowable(error).getCode() == io.grpc.Status.Code.ABORTED) {
+            return new ActorStateETagMismatchException("Actor state ETag no longer matches the stored value.", error);
+          }
+          return error;
+        })
+        .then();
   }
 
   /**
