@@ -190,7 +190,7 @@ class DaprStateAsyncProvider {
   }
 
   private String etagKey(String actorType, String actorId, String stateName) {
-    return actorType + "\u0000" + actorId + "\u0000" + stateName;
+    return actorType.length() + ":" + actorType + actorId.length() + ":" + actorId + stateName;
   }
 }
         });
