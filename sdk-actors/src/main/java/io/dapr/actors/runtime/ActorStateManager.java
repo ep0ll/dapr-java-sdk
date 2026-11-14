@@ -301,15 +301,9 @@ public class ActorStateManager {
    * Commits the current cached values after successful save.
    */
   private void flush() {
-    for (Map.Entry<String, StateChangeMetadata> tuple : this.stateChangeTracker.entrySet()) {
-      String stateName = tuple.getKey();
-      if (tuple.getValue().kind == ActorStateChangeKind.REMOVE) {
-        this.stateChangeTracker.remove(stateName);
-      } else {
-        StateChangeMetadata metadata = new StateChangeMetadata(ActorStateChangeKind.NONE, tuple.getValue().value);
-        this.stateChangeTracker.put(stateName, metadata);
-      }
-    }
+    // A committed write changes the row ETag. Evict cached state so the next
+    // read obtains the new value and its matching ETag.
+    this.stateChangeTracker.clear();
   }
 
   /**
