@@ -425,6 +425,18 @@ public class DaprClientImpl extends AbstractDaprClient {
   }
 
   @Override
+  public <T> Flux<T> subscribeToTopic(
+      String pubsubName,
+      String topic,
+      String deadLetterTopic,
+      TypeRef<T> type,
+      Map<String, String> metadata,
+      io.dapr.client.domain.BulkSubscribeOptions bulkSubscribeOptions) {
+    return this.pubSubClient.subscribeToTopic(
+        pubsubName, topic, deadLetterTopic, type, metadata, bulkSubscribeOptions);
+  }
+
+  @Override
   @Deprecated
   public <T> Mono<T> invokeMethod(InvokeMethodRequest invokeMethodRequest, TypeRef<T> type) {
     try {

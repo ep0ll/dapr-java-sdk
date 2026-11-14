@@ -29,6 +29,7 @@ import io.dapr.serializer.DefaultObjectSerializer;
 import io.dapr.utils.DefaultContentTypeConverter;
 import io.dapr.utils.TypeRef;
 import io.dapr.v1.DaprGrpc;
+import io.dapr.v1.DaprAppCallbackProtos;
 import io.dapr.v1.DaprPubsubProtos;
 import io.grpc.stub.StreamObserver;
 import org.slf4j.Logger;
@@ -224,6 +225,17 @@ final class DaprPubSubClient {
     if (deadLetterTopic != null && !deadLetterTopic.isEmpty()) {
       initialRequestBuilder.setDeadLetterTopic(deadLetterTopic);
     }
+    if (bulkSubscribeOptions != null && bulkSubscribeOptions.isEnabled()) {
+      DaprAppCallbackProtos.BulkSubscribeConfig.Builder bulkBuilder =
+          DaprAppCallbackProtos.BulkSubscribeConfig.newBuilder().setEnabled(true);
+      if (bulkSubscribeOptions.getMaxMessagesCount() != null) {
+        bulkBuilder.setMaxMessagesCount(bulkSubscribeOptions.getMaxMessagesCount());
+      }
+      if (bulkSubscribeOptions.getMaxAwaitDurationMs() != null) {
+        bulkBuilder.setMaxAwaitDurationMs(bulkSubscribeOptions.getMaxAwaitDurationMs());
+      }
+      initialRequestBuilder.setBulkSubscribe(bulkBuilder.build());
+    }
     DaprPubsubProtos.SubscribeTopicEventsRequestAlpha1 request =
         DaprPubsubProtos.SubscribeTopicEventsRequestAlpha1.newBuilder()
             .setInitialRequest(initialRequestBuilder.build())
@@ -259,6 +271,16 @@ final class DaprPubSubClient {
       String deadLetterTopic,
       TypeRef<T> type,
       Map<String, String> metadata) {
+    return subscribeToTopic(pubsubName, topic, deadLetterTopic, type, metadata, null);
+  }
+
+  <T> Flux<T> subscribeToTopic(
+      String pubsubName,
+      String topic,
+      String deadLetterTopic,
+      TypeRef<T> type,
+      Map<String, String> metadata,
+      io.dapr.client.domain.BulkSubscribeOptions bulkSubscribeOptions) {
     DaprPubsubProtos.SubscribeTopicEventsRequestInitialAlpha1.Builder initialRequestBuilder =
         DaprPubsubProtos.SubscribeTopicEventsRequestInitialAlpha1.newBuilder()
             .setTopic(topic)
@@ -283,7 +305,9 @@ final class DaprPubSubClient {
           interceptedStub,
           sink,
           type,
-          this.objectSerializer
+          this.objectSerializer,
+          pubsubName,
+          topic
       );
       StreamObserver<DaprPubsubProtos.SubscribeTopicEventsRequestAlpha1> requestStream = eventSubscriber.start(request);
 
@@ -327,6 +351,37 @@ final class DaprPubSubClient {
         cloudEvent.setSpecversion(message.getSpecVersion());
         cloudEvent.setType(message.getType());
         cloudEvent.setPubsubName(message.getPubsubName());
+        return cloudEvent;
+      } catch (IOException e) {
+        throw new RuntimeException(e);
+      }
+    }, entry -> {
+      if (entry == null || !entry.hasEntry()) {
+        return null;
+      }
+      try {
+        var payload = entry.getEntry();
+        CloudEvent<T> cloudEvent = new CloudEvent<>();
+        byte[] bytes;
+        if (payload.getEventCase() == DaprAppCallbackProtos.TopicEventBulkRequestEntry.EventCase.CLOUD_EVENT) {
+          var ce = payload.getCloudEvent();
+          bytes = ce.getData().toByteArray();
+          cloudEvent.setId(ce.getId());
+          cloudEvent.setSource(ce.getSource());
+          cloudEvent.setType(ce.getType());
+          cloudEvent.setSpecversion(ce.getSpecVersion());
+          cloudEvent.setDatacontenttype(ce.getDataContentType());
+        } else if (payload.getEventCase() == DaprAppCallbackProtos.TopicEventBulkRequestEntry.EventCase.BYTES) {
+          bytes = payload.getBytes().toByteArray();
+          cloudEvent.setId(payload.getEntryId());
+          cloudEvent.setDatacontenttype(payload.getContentType());
+        } else {
+          return null;
+        }
+        T object = type == null ? null : DaprPubSubClient.this.objectSerializer.deserialize(bytes, type);
+        cloudEvent.setData(object);
+        cloudEvent.setTopic(request.getInitialRequest().getTopic());
+        cloudEvent.setPubsubName(request.getInitialRequest().getPubsubName());
         return cloudEvent;
       } catch (IOException e) {
         throw new RuntimeException(e);

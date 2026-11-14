@@ -51,7 +51,8 @@ public class Subscription<T> implements Closeable {
   Subscription(DaprGrpc.DaprStub asyncStub,
                DaprPubsubProtos.SubscribeTopicEventsRequestAlpha1 request,
                SubscriptionListener<T> listener,
-               Function<DaprPubsubProtos.SubscribeTopicEventsResponseAlpha1, CloudEvent<T>> cloudEventConverter) {
+               Function<DaprPubsubProtos.SubscribeTopicEventsResponseAlpha1, CloudEvent<T>> cloudEventConverter,
+               Function<DaprPubsubProtos.SubscribeTopicEventsBulkEntryAlpha1, CloudEvent<T>> bulkCloudEventConverter) {
     final AtomicReference<StreamObserver<DaprPubsubProtos.SubscribeTopicEventsRequestAlpha1>> streamRef =
         new AtomicReference<>();
 
@@ -100,25 +101,23 @@ public class Subscription<T> implements Closeable {
                 throw new RuntimeException("Cannot receive event: streaming subscription is not initialized.");
               }
 
-              CloudEvent<T> cloudEvent = cloudEventConverter.apply(topicEventRequest);
-              if (cloudEvent == null) {
-                return;
-              }
-
-              var id = cloudEvent.getId();
-              if ((id == null) || id.isEmpty()) {
-                return;
-              }
-
-              streamReceivedEvent.set(true);
-              onEvent(listener, cloudEvent).subscribe(status -> {
-                var ack = buildAckRequest(id, status);
-                try {
-                  ackQueue.put(ack);
-                } catch (InterruptedException e) {
-                  throw new RuntimeException(e);
+              if (topicEventRequest.hasEventMessage()) {
+                CloudEvent<T> cloudEvent = cloudEventConverter.apply(topicEventRequest);
+                if (cloudEvent != null && cloudEvent.getId() != null && !cloudEvent.getId().isEmpty()) {
+                  processEvent(listener, cloudEvent, cloudEvent.getId());
+                  streamReceivedEvent.set(true);
                 }
-              });
+              }
+              for (var bulkEntry : topicEventRequest.getEventMessagesList()) {
+                if (bulkEntry.getDeliveryId().isEmpty() || !bulkEntry.hasEntry()) {
+                  throw new IllegalArgumentException("Bulk streaming response contains an invalid entry or delivery ID.");
+                }
+                CloudEvent<T> cloudEvent = bulkCloudEventConverter.apply(bulkEntry);
+                if (cloudEvent != null) {
+                  processEvent(listener, cloudEvent, bulkEntry.getDeliveryId());
+                  streamReceivedEvent.set(true);
+                }
+              }
             } catch (Exception e) {
               listener.onError(DaprException.propagate(e));
             }
@@ -160,6 +159,18 @@ public class Subscription<T> implements Closeable {
           }
           backoffMs = Math.min(backoffMs * 2, 30_000L);
         }
+      }
+    });
+  }
+
+  private void processEvent(SubscriptionListener<T> listener, CloudEvent<T> cloudEvent, String acknowledgementId) {
+    onEvent(listener, cloudEvent).subscribe(status -> {
+      var ack = buildAckRequest(acknowledgementId, status);
+      try {
+        ackQueue.put(ack);
+      } catch (InterruptedException e) {
+        Thread.currentThread().interrupt();
+        throw new RuntimeException(e);
       }
     });
   }

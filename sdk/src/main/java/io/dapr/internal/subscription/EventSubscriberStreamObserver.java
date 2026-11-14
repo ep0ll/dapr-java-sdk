@@ -46,6 +46,8 @@ public class EventSubscriberStreamObserver<T>
   private final FluxSink<T> sink;
   private final TypeRef<T> type;
   private final DaprObjectSerializer objectSerializer;
+  private final String pubsubName;
+  private final String topic;
 
   private StreamObserver<DaprPubsubProtos.SubscribeTopicEventsRequestAlpha1> requestStream;
 
@@ -61,11 +63,15 @@ public class EventSubscriberStreamObserver<T>
       DaprGrpc.DaprStub stub,
       FluxSink<T> sink,
       TypeRef<T> type,
-      DaprObjectSerializer objectSerializer) {
+      DaprObjectSerializer objectSerializer,
+      String pubsubName,
+      String topic) {
     this.stub = stub;
     this.sink = sink;
     this.type = type;
     this.objectSerializer = objectSerializer;
+    this.pubsubName = pubsubName;
+    this.topic = topic;
   }
 
   private static DaprPubsubProtos.SubscribeTopicEventsRequestAlpha1 buildSuccessAck(String eventId) {
@@ -156,36 +162,29 @@ public class EventSubscriberStreamObserver<T>
     return null; // Raw CloudEvent without type parameter
   }
 
-  private void emitDataAndAcknowledge(T data, String eventId) {
-    // Only emit if data is not null (Reactor doesn't allow null values in Flux)
+  private void emitDataAndAcknowledge(T data, String acknowledgementId) {
     if (data != null) {
       sink.next(data);
     }
-
-    // Send SUCCESS acknowledgment
-    requestStream.onNext(buildSuccessAck(eventId));
+    requestStream.onNext(buildSuccessAck(acknowledgementId));
   }
 
-  private void handleDeserializationError(String eventId, IOException cause) {
-    logger.error("Deserialization failed for event ID: {}, sending DROP ack", eventId, cause);
-
-    // Send DROP ack - cannot process malformed data
-    requestStream.onNext(buildDropAck(eventId));
-
-    // Propagate error to sink
+  private void handleDeserializationError(String acknowledgementId, IOException cause) {
+    logger.error("Deserialization failed for delivery ID: {}, sending DROP ack", acknowledgementId, cause);
+    requestStream.onNext(buildDropAck(acknowledgementId));
     sink.error(new DaprException("DESERIALIZATION_ERROR",
-        "Failed to deserialize event with ID: " + eventId, cause));
+        "Failed to deserialize event with delivery ID: " + acknowledgementId, cause));
   }
 
-  private void handleProcessingError(String eventId, Exception cause) {
-    logger.error("Processing error for event ID: {}, attempting to send RETRY ack", eventId, cause);
+  private void handleProcessingError(String acknowledgementId, Exception cause) {
+    logger.error("Processing error for delivery ID: {}, attempting to send RETRY ack", acknowledgementId, cause);
 
     try {
       // Try to send RETRY acknowledgment
-      requestStream.onNext(buildRetryAck(eventId));
+      requestStream.onNext(buildRetryAck(acknowledgementId));
     } catch (Exception ackException) {
       // Failed to send ack - this is critical
-      logger.error("Failed to send RETRY ack for event ID: {}", eventId, ackException);
+      logger.error("Failed to send RETRY ack for event ID: {}", acknowledgementId, ackException);
       sink.error(DaprException.propagate(ackException));
 
       return;
@@ -230,23 +229,91 @@ public class EventSubscriberStreamObserver<T>
 
   @Override
   public void onNext(DaprPubsubProtos.SubscribeTopicEventsResponseAlpha1 response) {
-    if (!isValidEventMessage(response)) {
+    if (response.hasInitialResponse()) {
       return;
     }
-
-    DaprAppCallbackProtos.TopicEventRequest message = response.getEventMessage();
-    String eventId = message.getId();
-
-    try {
-      T data = deserializeEventData(message);
-      emitDataAndAcknowledge(data, eventId);
-    } catch (IOException e) {
-      // Deserialization failure - send DROP ack
-      handleDeserializationError(eventId, e);
-    } catch (Exception e) {
-      // Processing failure - send RETRY ack
-      handleProcessingError(eventId, e);
+    if (response.hasEventMessage() && !response.getEventMessagesList().isEmpty()) {
+      sink.error(new IllegalStateException("Streaming response contains both single and bulk events."));
+      return;
     }
+    if (response.hasEventMessage()) {
+      processSingleEvent(response.getEventMessage());
+    }
+    for (DaprPubsubProtos.SubscribeTopicEventsBulkEntryAlpha1 bulkEntry : response.getEventMessagesList()) {
+      processBulkEvent(bulkEntry);
+    }
+  }
+
+  private void processSingleEvent(DaprAppCallbackProtos.TopicEventRequest message) {
+    String acknowledgementId = message.getId();
+    if (acknowledgementId.isEmpty()) {
+      logger.warn("Received streaming pub/sub event with an empty ID.");
+      return;
+    }
+    try {
+      emitDataAndAcknowledge(deserializeEventData(message), acknowledgementId);
+    } catch (IOException e) {
+      handleDeserializationError(acknowledgementId, e);
+    } catch (Exception e) {
+      handleProcessingError(acknowledgementId, e);
+    }
+  }
+
+  private void processBulkEvent(DaprPubsubProtos.SubscribeTopicEventsBulkEntryAlpha1 bulkEntry) {
+    String acknowledgementId = bulkEntry.getDeliveryId();
+    if (acknowledgementId.isEmpty() || !bulkEntry.hasEntry()) {
+      logger.error("Received invalid streaming bulk entry without a delivery ID or payload.");
+      return;
+    }
+    try {
+      emitDataAndAcknowledge(deserializeBulkEntry(bulkEntry.getEntry()), acknowledgementId);
+    } catch (IOException e) {
+      handleDeserializationError(acknowledgementId, e);
+    } catch (Exception e) {
+      handleProcessingError(acknowledgementId, e);
+    }
+  }
+
+  private T deserializeBulkEntry(DaprAppCallbackProtos.TopicEventBulkRequestEntry entry) throws IOException {
+    if (entry.getEventCase() == DaprAppCallbackProtos.TopicEventBulkRequestEntry.EventCase.CLOUD_EVENT) {
+      var ce = entry.getCloudEvent();
+      if (type != null && isCloudEventType(type)) {
+        return buildCloudEventFromBulkEntry(entry);
+      }
+      return type == null ? null : objectSerializer.deserialize(ce.getData().toByteArray(), type);
+    }
+    if (entry.getEventCase() == DaprAppCallbackProtos.TopicEventBulkRequestEntry.EventCase.BYTES) {
+      if (type != null && isCloudEventType(type)) {
+        return buildCloudEventFromBulkEntry(entry);
+      }
+      return type == null ? null : objectSerializer.deserialize(entry.getBytes().toByteArray(), type);
+    }
+    throw new IOException("Bulk subscription entry has no event payload.");
+  }
+
+  @SuppressWarnings("unchecked")
+  private T buildCloudEventFromBulkEntry(DaprAppCallbackProtos.TopicEventBulkRequestEntry entry) throws IOException {
+    CloudEvent<Object> cloudEvent = new CloudEvent<>();
+    byte[] bytes;
+    if (entry.getEventCase() == DaprAppCallbackProtos.TopicEventBulkRequestEntry.EventCase.CLOUD_EVENT) {
+      var ce = entry.getCloudEvent();
+      bytes = ce.getData().toByteArray();
+      cloudEvent.setId(ce.getId());
+      cloudEvent.setSource(ce.getSource());
+      cloudEvent.setType(ce.getType());
+      cloudEvent.setSpecversion(ce.getSpecVersion());
+      cloudEvent.setDatacontenttype(ce.getDataContentType());
+    } else {
+      bytes = entry.getBytes().toByteArray();
+      cloudEvent.setId(entry.getEntryId());
+      cloudEvent.setDatacontenttype(entry.getContentType());
+    }
+    TypeRef<?> innerType = extractInnerType(type);
+    Object data = innerType == null ? bytes : objectSerializer.deserialize(bytes, innerType);
+    cloudEvent.setData(data);
+    cloudEvent.setTopic(topic);
+    cloudEvent.setPubsubName(pubsubName);
+    return (T) cloudEvent;
   }
 
   private boolean isValidEventMessage(DaprPubsubProtos.SubscribeTopicEventsResponseAlpha1 response) {
