@@ -34,6 +34,9 @@ final class ActorStateOperation {
    */
   private Object value;
 
+  /** ETag associated with the value originally read from the state store. */
+  private String etag;
+
   /**
    * Instantiates a new Actor Timer.
    *
@@ -43,10 +46,12 @@ final class ActorStateOperation {
    */
   ActorStateOperation(String operationType,
                       String key,
-                      Object value) {
+                      Object value,
+                      String etag) {
     this.operationType = operationType;
     this.key = key;
     this.value = value;
+    this.etag = etag;
   }
 
   /**
@@ -74,5 +79,14 @@ final class ActorStateOperation {
    */
   public Object getValue() {
     return value;
+  }
+
+  /**
+   * Gets the ETag associated with the state value.
+   *
+   * @return ETag, or null when the key was not previously stored.
+   */
+  public String getETag() {
+    return etag;
   }
 }
